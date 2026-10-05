@@ -17,6 +17,28 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const createDemoSession = (email: string, fullName: string) => {
+  const demoUser = {
+    id: `demo-user-${Date.now()}`,
+    email,
+    app_metadata: { provider: 'demo' },
+    user_metadata: { full_name: fullName },
+    aud: 'authenticated',
+    created_at: new Date().toISOString(),
+  } as User;
+
+  const demoSession = {
+    access_token: 'demo-access-token',
+    refresh_token: 'demo-refresh-token',
+    expires_in: 3600,
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    token_type: 'bearer',
+    user: demoUser,
+  } as Session;
+
+  return { demoUser, demoSession };
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -24,7 +46,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (uid: string) => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      setProfile({
+        id: uid,
+        full_name: 'Demo Farmer',
+        location: 'Demo Farm',
+        farm_info: 'Demo mode',
+        temp_unit: 'C',
+        notifications_enabled: true,
+      });
+      return;
+    }
+
     try {
       const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
       setProfile(data as Profile | null);
@@ -34,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshProfile = async () => {
-    if (!isSupabaseConfigured || !user) return;
+    if (!user) return;
     await fetchProfile(user.id);
   };
 
@@ -90,7 +123,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    if (!isSupabaseConfigured) return { error: 'Supabase is not configured in this environment.' };
+    if (!isSupabaseConfigured) {
+      const displayName = fullName.trim() || 'Demo Farmer';
+      const { demoUser, demoSession } = createDemoSession(email, displayName);
+      setSession(demoSession);
+      setUser(demoUser);
+      setProfile({
+        id: demoUser.id,
+        full_name: displayName,
+        location: 'Demo Farm',
+        farm_info: 'Demo mode',
+        temp_unit: 'C',
+        notifications_enabled: true,
+      });
+      setLoading(false);
+      return { error: null };
+    }
+
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -111,7 +160,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signIn = async (email: string, password: string) => {
-    if (!isSupabaseConfigured) return { error: 'Supabase is not configured in this environment.' };
+    if (!isSupabaseConfigured) {
+      const trimmedName = email.split('@')[0]?.replace(/[._-]/g, ' ') || 'Demo Farmer';
+      const { demoUser, demoSession } = createDemoSession(email, trimmedName);
+      setSession(demoSession);
+      setUser(demoUser);
+      setProfile({
+        id: demoUser.id,
+        full_name: trimmedName,
+        location: 'Demo Farm',
+        farm_info: 'Demo mode',
+        temp_unit: 'C',
+        notifications_enabled: true,
+      });
+      setLoading(false);
+      return { error: null };
+    }
+
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return { error: error.message };
@@ -124,7 +189,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resetPassword = async (email: string) => {
     if (!isSupabaseConfigured) {
       return {
-        error: 'Password reset is unavailable because Supabase is not configured in this environment.',
+        error: null,
+        message: 'Demo mode: password reset is not required. Use the login form to continue.',
       };
     }
 
@@ -144,7 +210,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+      return;
+    }
+
     try {
       await supabase.auth.signOut();
     } finally {
