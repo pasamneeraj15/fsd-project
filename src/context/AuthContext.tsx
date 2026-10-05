@@ -25,8 +25,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchProfile = async (uid: string) => {
     if (!isSupabaseConfigured) return;
-    const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
-    setProfile(data as Profile | null);
+    try {
+      const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
+      setProfile(data as Profile | null);
+    } catch {
+      setProfile(null);
+    }
   };
 
   const refreshProfile = async () => {
@@ -43,18 +47,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id).finally(() => setLoading(false));
-      } else {
-        setLoading(false);
-      }
-    });
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      (async () => {
+    const initializeSession = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
@@ -62,8 +59,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setProfile(null);
         }
+      } catch {
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+      } finally {
         setLoading(false);
-      })();
+      }
+    };
+
+    initializeSession();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      try {
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await fetchProfile(session.user.id);
+        } else {
+          setProfile(null);
+        }
+      } catch {
+        setProfile(null);
+      } finally {
+        setLoading(false);
+      }
     });
 
     return () => sub.subscription.unsubscribe();
@@ -71,26 +91,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string, fullName: string) => {
     if (!isSupabaseConfigured) return { error: 'Supabase is not configured in this environment.' };
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } },
-    });
-    if (error) return { error: error.message };
-    if (data.user) {
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        full_name: fullName,
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: fullName } },
       });
+      if (error) return { error: error.message };
+      if (data.user) {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          full_name: fullName,
+        });
+      }
+      return { error: null };
+    } catch {
+      return { error: 'Unable to create your account right now. Please try again.' };
     }
-    return { error: null };
   };
 
   const signIn = async (email: string, password: string) => {
     if (!isSupabaseConfigured) return { error: 'Supabase is not configured in this environment.' };
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: error.message };
-    return { error: null };
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) return { error: error.message };
+      return { error: null };
+    } catch {
+      return { error: 'Unable to sign in right now. Please try again.' };
+    }
   };
 
   const resetPassword = async (email: string) => {
@@ -100,21 +128,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/login`,
-    });
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/login`,
+      });
 
-    if (error) return { error: error.message };
-    return {
-      error: null,
-      message: 'Password reset instructions have been sent to your email.',
-    };
+      if (error) return { error: error.message };
+      return {
+        error: null,
+        message: 'Password reset instructions have been sent to your email.',
+      };
+    } catch {
+      return { error: 'Unable to send reset instructions right now. Please try again.' };
+    }
   };
 
   const signOut = async () => {
     if (!isSupabaseConfigured) return;
-    await supabase.auth.signOut();
-    setProfile(null);
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      setProfile(null);
+    }
   };
 
   return (
